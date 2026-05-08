@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+*.pth
+*.pt
+*.bin
+*.csv
+*.pkl
+
+data/
+detector/
+
+venv/
+.venv/
+env/
+
+.cache/
+hf_cache/

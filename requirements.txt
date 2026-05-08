@@ -1,0 +1,10 @@
+torch
+transformers
+accelerate
+bitsandbytes
+streamlit
+matplotlib
+seaborn
+scipy
+numpy
+scikit-learn
