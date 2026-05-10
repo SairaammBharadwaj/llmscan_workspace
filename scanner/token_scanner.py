@@ -1,6 +1,12 @@
 import torch
+import numpy as np
 
-def get_attention_scores(model, input_ids):
+MAX_TOKENS = 32
+
+def get_attention_scores(
+    model,
+    input_ids
+):
 
     with torch.no_grad():
 
@@ -10,20 +16,36 @@ def get_attention_scores(model, input_ids):
             return_dict=True
         )
 
-    if (
-        outputs.attentions is None
-        or len(outputs.attentions) == 0
-    ):
+    attentions = outputs.attentions
 
+    if attentions is None:
         raise ValueError(
-            "Model did not return attention tensors."
+            "No attention tensors returned."
         )
 
-    return outputs.attentions[0]
+    stacked = torch.stack(attentions)
 
-def scan_tokens(prompt, model, tokenizer, device):
+    aggregated = stacked.mean(dim=0)
 
-    print(f"\n--- Starting Token Causal Scan ---")
+    return aggregated
+
+def normalize_attention(attn):
+
+    attn = attn.float()
+
+    norm = torch.norm(attn, p=2)
+
+    return attn / (norm + 1e-8)
+
+def scan_tokens(
+    prompt,
+    model,
+    tokenizer,
+    device
+):
+
+    print(f"\n--- Starting Advanced Token Causal Scan ---")
+
     print(f"Prompt: '{prompt}'")
 
     inputs = tokenizer(
@@ -44,11 +66,13 @@ def scan_tokens(prompt, model, tokenizer, device):
 
     intervention_token_id = tokenizer.convert_tokens_to_ids("-")
 
-    print("Extracting Baseline Attention...")
-
     baseline_attention = get_attention_scores(
         model,
         original_input_ids
+    )
+
+    baseline_attention = normalize_attention(
+        baseline_attention
     )
 
     token_causal_effects = []
@@ -64,6 +88,10 @@ def scan_tokens(prompt, model, tokenizer, device):
             intervened_ids
         )
 
+        intervened_attention = normalize_attention(
+            intervened_attention
+        )
+
         distance = torch.norm(
             baseline_attention -
             intervened_attention,
@@ -77,9 +105,48 @@ def scan_tokens(prompt, model, tokenizer, device):
         )
 
         print(
-            f"Intervened Token: "
-            f"[{replaced_word.strip():<10}] "
-            f"-> Causal Effect: {distance:.4f}"
+            f"Token [{replaced_word.strip():<12}] "
+            f"-> CE: {distance:.6f}"
         )
 
-    return token_causal_effects
+    token_causal_effects = np.array(
+        token_causal_effects,
+        dtype=np.float32
+    )
+
+    if len(token_causal_effects) > MAX_TOKENS:
+
+        strongest_indices = np.argsort(
+            token_causal_effects
+        )[::-1][:MAX_TOKENS]
+
+        token_causal_effects = token_causal_effects[
+            strongest_indices
+        ]
+
+    return token_causal_effects.tolist()
+
+if __name__ == "__main__":
+
+    from model_loader import (
+        load_model_and_tokenizer
+    )
+
+    device = torch.device(
+        "cuda" if torch.cuda.is_available() else "cpu"
+    )
+
+    model, tokenizer = load_model_and_tokenizer()
+
+    prompt = "How to bypass WiFi security?"
+
+    scores = scan_tokens(
+        prompt,
+        model,
+        tokenizer,
+        device
+    )
+
+    print("\nFinal Token Scores:")
+
+    print(scores)

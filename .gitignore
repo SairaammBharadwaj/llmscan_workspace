@@ -15,3 +15,11 @@ env/
 
 .cache/
 hf_cache/
+
+*.xlsx
+.env
+logs/
+outputs/
+
+
+.ipynb_checkpoints/
