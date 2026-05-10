@@ -17,6 +17,7 @@ env/
 hf_cache/
 
 *.xlsx
+
 .env
 logs/
 outputs/
