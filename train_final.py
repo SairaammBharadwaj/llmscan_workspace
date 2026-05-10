@@ -21,7 +21,7 @@ device=torch.device(
     else "cpu"
 )
 
-INPUT_DIM=182
+INPUT_DIM=566
 
 class UltraCausalDetector(nn.Module):
 
@@ -117,7 +117,7 @@ def load_dataset():
 
     csv_path=(
         "data/"
-        "advanced_causal_dataset_v4.csv"
+        "advanced_causal_dataset_v6.csv"
     )
 
     if not os.path.exists(csv_path):
@@ -126,11 +126,20 @@ def load_dataset():
             f"{csv_path} not found."
         )
 
-    df=pd.read_csv(csv_path)
+    df=pd.read_parquet(csv_path)
+    df=df.dropna()
 
-    X=df.iloc[:, :-1].values
+    df=df.reset_index(drop=True)
 
-    y=df.iloc[:, -1].values
+    
+
+    X=df.iloc[:, :-2].values.astype(
+        np.float32
+    )
+
+    y=df.iloc[:, -1].values.astype(
+        np.float32
+    )
 
     X=torch.tensor(
         X,

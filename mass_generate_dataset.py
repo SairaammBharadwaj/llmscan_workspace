@@ -6,30 +6,24 @@ import random
 import numpy as np
 
 from tqdm import tqdm
+from math import ceil
 
 from scanner.token_scanner import scan_tokens
 from scanner.layer_scanner import scan_layers
-from scanner.hidden_state_scanner import (
-    scan_hidden_states
-)
-from scanner.neuron_scanner import (
-    scan_neurons
-)
-from scanner.feature_extractor import (
-    extract_token_features
-)
-from scanner.model_loader import (
-    load_model_and_tokenizer
-)
+from scanner.hidden_state_scanner import scan_hidden_states
+from scanner.neuron_scanner import scan_neurons
+from scanner.feature_extractor import extract_token_features
+from scanner.model_loader import load_model_and_tokenizer
+from scanner.semantic_scanner import extract_semantic_features
 
 device=torch.device(
     "cuda" if torch.cuda.is_available()
     else "cpu"
 )
 
-OUTPUT_FILE="data/advanced_causal_dataset_v4.csv"
+OUTPUT_FILE="data/advanced_causal_dataset_v7.parquet"
 
-MAX_DATASET_SIZE=2000
+CHECKPOINT_EVERY=10
 
 def clean_prompt(text):
 
@@ -39,9 +33,28 @@ def clean_prompt(text):
 
     return text
 
-def load_balanced_prompts(
-    target_per_class=1
-):
+def normalize_group(arr):
+
+    arr=np.array(
+        arr,
+        dtype=np.float32
+    )
+
+    mean=np.mean(arr)
+
+    std=np.std(arr)
+
+    if std < 1e-8:
+
+        std=1e-8
+
+    arr=(arr-mean)/std
+
+    arr=np.nan_to_num(arr)
+
+    return arr
+
+def load_balanced_prompts():
 
     base_path=(
         "data/processed_questions/"
@@ -132,70 +145,100 @@ def load_balanced_prompts(
                 data["non_stereotype_data"]
             )
 
+    dataset_files=[
+
+        "data/hard_negatives.json",
+
+        "data/cyber_hard_negatives.json",
+
+        "data/programming_safe.json"
+
+    ]
+
+    for dataset_path in dataset_files:
+
+        if os.path.exists(dataset_path):
+
+            with open(
+                dataset_path,
+                "r",
+                encoding="utf-8"
+            ) as f:
+
+                extra_data=json.load(f)
+
+                if "safe" in extra_data:
+
+                    all_safe.extend(
+                        extra_data["safe"]
+                    )
+
+                if "unsafe" in extra_data:
+
+                    all_unsafe.extend(
+                        extra_data["unsafe"]
+                    )
+
     safe_clean=list(set([
+
         clean_prompt(p)
 
         for p in all_safe
 
         if len(str(p)) > 15
+
     ]))
 
     unsafe_clean=list(set([
+
         clean_prompt(p)
 
         for p in all_unsafe
 
         if len(str(p)) > 15
+
     ]))
 
-    safe_clean=random.sample(
-        safe_clean,
-        target_per_class
+    random.shuffle(safe_clean)
+
+    random.shuffle(unsafe_clean)
+
+    print(
+        f"\nLoaded "
+        f"{len(safe_clean)} SAFE prompts"
     )
 
-    unsafe_clean=random.sample(
-        unsafe_clean,
-        target_per_class
+    print(
+        f"Loaded "
+        f"{len(unsafe_clean)} UNSAFE prompts"
     )
 
     return safe_clean,unsafe_clean
 
-def build_feature_vector(
-    token_scores,
-    layer_scores,
-    hidden_state_data,
-    neuron_signature
+def summarize_hidden_states(
+    hidden_state_data
 ):
 
-    token_features=extract_token_features(
-        token_scores
-    )
-
-    layer_scores=np.array(
-        layer_scores,
-        dtype=np.float32
-    )
-
-    layer_scores=(
-        layer_scores /
-        (
-            np.linalg.norm(layer_scores)
-            + 1e-8
-        )
-    )
-
     transition_scores=np.array(
+
         hidden_state_data[
             "transition_scores"
         ],
+
         dtype=np.float32
     )
 
     activation_stats=np.array(
+
         hidden_state_data[
             "activation_stats"
         ],
+
         dtype=np.float32
+    )
+
+    transition_scores=normalize_group(
+        transition_scores
     )
 
     activation_summary=[
@@ -223,53 +266,123 @@ def build_feature_vector(
         )
     ]
 
-    neuron_signature=np.array(
-        neuron_signature,
-        dtype=np.float32
+    activation_summary=normalize_group(
+        activation_summary
     )
 
-    neuron_signature=(
-        neuron_signature /
-        (
-            np.linalg.norm(
-                neuron_signature
-            ) + 1e-8
-        )
+    return (
+        transition_scores,
+        activation_summary
+    )
+
+def build_feature_vector(
+
+    token_scores,
+    layer_scores,
+    hidden_state_data,
+    neuron_signature,
+    semantic_features
+
+):
+
+    token_features=extract_token_features(
+        token_scores
+    )
+
+    token_features=normalize_group(
+        token_features
+    )
+
+    layer_scores=normalize_group(
+        layer_scores
+    )
+
+    (
+        transition_scores,
+        activation_summary
+
+    )=summarize_hidden_states(
+        hidden_state_data
+    )
+
+    neuron_signature=normalize_group(
+        neuron_signature
+    )
+
+    semantic_features=normalize_group(
+        semantic_features
     )
 
     final_vector=np.concatenate([
 
-        np.array(
-            token_features,
-            dtype=np.float32
-        ),
+        token_features,
 
         layer_scores,
 
         transition_scores,
 
-        np.array(
-            activation_summary,
-            dtype=np.float32
-        ),
+        activation_summary,
 
-        neuron_signature
+        neuron_signature,
+
+        semantic_features
+
     ])
 
+    final_vector=np.nan_to_num(
+        final_vector
+    )
+
+    final_vector=np.clip(
+        final_vector,
+        -10,
+        10
+    )
+
     return final_vector.tolist()
+
+def load_existing_dataset():
+
+    if os.path.exists(OUTPUT_FILE):
+
+        try:
+
+            existing_df=pd.read_parquet(
+                OUTPUT_FILE
+            )
+
+            existing_data=(
+                existing_df.values.tolist()
+            )
+
+            print(
+                f"Loaded existing dataset "
+                f"with {len(existing_data)} samples"
+            )
+
+            return existing_data
+
+        except Exception as e:
+
+            print(
+                f"Could not load existing "
+                f"dataset: {e}"
+            )
+
+            return []
+
+    return []
 
 def run_massive_scan():
 
     print(
-        "Loading Mistral-7B..."
+        "\nLoading Mistral-7B..."
     )
 
     llm,tokenizer=load_model_and_tokenizer()
 
     safe_list,unsafe_list=(
-        load_balanced_prompts(
-            target_per_class=1
-        )
+        load_balanced_prompts()
     )
 
     dataset=(
@@ -280,18 +393,66 @@ def run_massive_scan():
 
     random.shuffle(dataset)
 
-    results=[]
+    total_prompts=len(dataset)
 
     print(
-        f"Starting Advanced Scan "
-        f"on {len(dataset)} prompts..."
+        f"\nTOTAL PROMPTS:"
+        f" {total_prompts}"
     )
 
+    results=load_existing_dataset()
+
+    existing_prompts=set()
+
+    for row in results:
+
+        try:
+
+            existing_prompts.add(
+                str(row[-2])
+            )
+
+        except:
+
+            pass
+
+    completed=len(existing_prompts)
+
+    remaining=(
+        total_prompts-completed
+    )
+
+    print(
+        f"\nAlready Completed:"
+        f" {completed}"
+    )
+
+    print(
+        f"Remaining:"
+        f" {remaining}"
+    )
+
+    print(
+        "\nStarting Advanced Scan...\n"
+    )
+
+    progress_bar=tqdm(
+        total=remaining,
+        desc="Scanning Prompts",
+        unit="prompt"
+    )
+
+    processed_count=0
+
     for idx,(prompt,label) in enumerate(
-        tqdm(dataset)
+        dataset
     ):
 
         try:
+
+            if prompt in existing_prompts:
+
+                continue
 
             token_scores=scan_tokens(
                 prompt,
@@ -323,55 +484,91 @@ def run_massive_scan():
                 device
             )
 
-            feature_vector=build_feature_vector(
-                token_scores,
-                layer_scores,
-                hidden_state_data,
-                neuron_signature
+            semantic_features=(
+                extract_semantic_features(
+                    prompt
+                )
             )
+
+            feature_vector=build_feature_vector(
+
+                token_scores,
+
+                layer_scores,
+
+                hidden_state_data,
+
+                neuron_signature,
+
+                semantic_features
+            )
+
+            feature_vector.append(prompt)
 
             feature_vector.append(label)
 
             results.append(feature_vector)
 
-            if idx % 25 == 0 and idx > 0:
+            processed_count+=1
+
+            progress_bar.update(1)
+
+            progress_bar.set_postfix({
+
+                "processed":
+                processed_count,
+
+                "remaining":
+                remaining-processed_count
+            })
+
+            if (
+                processed_count
+                %
+                CHECKPOINT_EVERY
+                ==
+                0
+            ):
 
                 df=pd.DataFrame(results)
 
-                df.to_csv(
+                df.to_parquet(
                     OUTPUT_FILE,
                     index=False
                 )
 
                 print(
-                    f"Checkpoint Saved "
-                    f"({idx} samples)"
+                    f"\nCheckpoint Saved "
+                    f"({processed_count})"
                 )
 
         except Exception as e:
 
             print(
-                f"Skipping prompt "
+                f"\nSkipping prompt "
                 f"due to error: {e}"
             )
 
             continue
 
+    progress_bar.close()
+
     df=pd.DataFrame(results)
 
-    df.to_csv(
+    df.to_parquet(
         OUTPUT_FILE,
         index=False
     )
 
     print(
-        f"\nDataset Saved:"
+        "\nFINAL DATASET SAVED"
     )
 
     print(OUTPUT_FILE)
 
     print(
-        f"Total Samples: {len(results)}"
+        f"Total Samples: "
+        f"{len(results)}"
     )
 
 if __name__=="__main__":

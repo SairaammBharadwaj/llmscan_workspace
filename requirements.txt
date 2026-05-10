@@ -8,3 +8,8 @@ seaborn
 scipy
 numpy
 scikit-learn
+pandas
+tqdm
+sentence-transformers
+pyarrow
+fastparquet

@@ -16,7 +16,7 @@ device=torch.device(
     else "cpu"
 )
 
-INPUT_DIM=182
+INPUT_DIM=566
 
 SAFE_PROMPTS=[
 

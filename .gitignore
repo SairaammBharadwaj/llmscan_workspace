@@ -4,6 +4,7 @@ __pycache__/
 *.pt
 *.bin
 *.csv
+*.parquet
 *.pkl
 
 data/
@@ -16,11 +17,8 @@ env/
 .cache/
 hf_cache/
 
-*.xlsx
-
 .env
 logs/
 outputs/
-
 
 .ipynb_checkpoints/
