@@ -1,224 +1,99 @@
 import torch
 import numpy as np
 
-TOP_K_NEURONS = 64
+def scan_neurons_batch(
 
-def normalize_array(arr):
-
-    arr = np.array(
-        arr,
-        dtype=np.float32
-    )
-
-    norm = np.linalg.norm(arr)
-
-    return arr / (norm + 1e-8)
-
-def collect_mlp_activations(
-    prompt,
+    prompts,
     model,
     tokenizer,
-    device
+    device,
+
+    top_k=32
+
 ):
 
-    inputs = tokenizer(
-        prompt,
-        return_tensors="pt",
-        truncation=True,
-        max_length=128
+    print(
+        "\n--- Batch Neuron Scan ---"
     )
 
-    inputs = {
-        k: v.to(device)
-        for k, v in inputs.items()
+    inputs=tokenizer(
+
+        prompts,
+
+        return_tensors="pt",
+
+        padding=True,
+
+        truncation=True,
+
+        max_length=128
+
+    )
+
+    inputs={
+
+        k:v.to(device)
+
+        for k,v in inputs.items()
     }
-
-    collected = []
-
-    hooks = []
-
-    if hasattr(model, "model"):
-
-        layers = model.model.layers
-
-    elif hasattr(model, "transformer"):
-
-        layers = model.transformer.h
-
-    else:
-
-        raise ValueError(
-            "Unsupported transformer architecture."
-        )
-
-    def activation_hook(
-        module,
-        inputs,
-        output
-    ):
-
-        if isinstance(output, tuple):
-
-            hidden = output[0]
-
-        else:
-
-            hidden = output
-
-        activation_strength = (
-            torch.mean(
-                torch.abs(hidden)
-            ).item()
-        )
-
-        collected.append(
-            activation_strength
-        )
-
-    for layer in layers:
-
-        if hasattr(layer, "mlp"):
-
-            hook = (
-                layer.mlp.register_forward_hook(
-                    activation_hook
-                )
-            )
-
-            hooks.append(hook)
 
     with torch.no_grad():
 
-        model(**inputs)
+        with torch.autocast(
+            device_type="cuda",
+            dtype=torch.float16
+        ):
 
-    for hook in hooks:
+            outputs=model(
 
-        hook.remove()
+                **inputs,
 
-    return collected
+                output_hidden_states=True,
 
-def extract_neuron_signature(
-    activations
-):
+                return_dict=True
+            )
 
-    activations = np.array(
-        activations,
-        dtype=np.float32
-    )
+    hidden_states=outputs.hidden_states
 
-    activations = normalize_array(
-        activations
-    )
+    final_hidden=hidden_states[-1]
 
-    sorted_indices = np.argsort(
-        activations
-    )[::-1]
+    batch_size=final_hidden.shape[0]
 
-    top_values = activations[
-        sorted_indices
-    ][:TOP_K_NEURONS]
+    batch_results=[]
 
-    if len(top_values) < TOP_K_NEURONS:
+    for batch_idx in range(batch_size):
 
-        padding = np.zeros(
-            TOP_K_NEURONS - len(top_values),
-            dtype=np.float32
+        hidden_vector=final_hidden[
+            batch_idx
+        ]
+
+        neuron_strengths=(
+
+            hidden_vector
+            .abs()
+            .mean(dim=0)
         )
 
-        top_values = np.concatenate([
-            top_values,
-            padding
-        ])
+        top_values,_=torch.topk(
 
-    summary_stats = [
+            neuron_strengths,
 
-        np.mean(activations),
-
-        np.std(activations),
-
-        np.max(activations),
-
-        np.min(activations),
-
-        np.median(activations),
-
-        np.var(activations)
-    ]
-
-    final_signature = np.concatenate([
-
-        top_values,
-
-        np.array(
-            summary_stats,
-            dtype=np.float32
+            k=min(
+                top_k,
+                neuron_strengths.shape[0]
+            )
         )
-    ])
 
-    return final_signature.tolist()
-
-def scan_neurons(
-    prompt,
-    model,
-    tokenizer,
-    device
-):
-
-    print(
-        "\n--- Neuron Analysis ---"
-    )
-
-    print(f"Prompt: {prompt}")
-
-    activations = collect_mlp_activations(
-        prompt,
-        model,
-        tokenizer,
-        device
-    )
-
-    neuron_signature = (
-        extract_neuron_signature(
-            activations
+        neuron_signature=(
+            top_values
+            .float()
+            .cpu()
+            .numpy()
+            .tolist()
         )
-    )
 
-    return neuron_signature
+        batch_results.append(
+            neuron_signature
+        )
 
-if __name__ == "__main__":
-
-    from model_loader import (
-        load_model_and_tokenizer
-    )
-
-    device = torch.device(
-        "cuda" if torch.cuda.is_available()
-        else "cpu"
-    )
-
-    model, tokenizer = (
-        load_model_and_tokenizer()
-    )
-
-    prompt = (
-        "How can malware bypass detection?"
-    )
-
-    signature = scan_neurons(
-        prompt,
-        model,
-        tokenizer,
-        device
-    )
-
-    print(
-        "\nNeuron Signature Size:"
-    )
-
-    print(len(signature))
-
-    print(
-        "\nNeuron Signature:"
-    )
-
-    print(signature[:20])
+    return batch_results

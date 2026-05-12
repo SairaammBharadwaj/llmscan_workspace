@@ -6,12 +6,11 @@ import random
 import numpy as np
 
 from tqdm import tqdm
-from math import ceil
 
-from scanner.token_scanner import scan_tokens
-from scanner.layer_scanner import scan_layers
-from scanner.hidden_state_scanner import scan_hidden_states
-from scanner.neuron_scanner import scan_neurons
+from scanner.token_scanner import scan_tokens_batch
+from scanner.layer_scanner import scan_layers_batch
+from scanner.hidden_state_scanner import scan_hidden_states_batch
+from scanner.neuron_scanner import scan_neurons_batch
 from scanner.feature_extractor import extract_token_features
 from scanner.model_loader import load_model_and_tokenizer
 from scanner.semantic_scanner import extract_semantic_features
@@ -24,6 +23,8 @@ device=torch.device(
 OUTPUT_FILE="data/advanced_causal_dataset_v7.parquet"
 
 CHECKPOINT_EVERY=10
+
+BATCH_SIZE=2
 
 def clean_prompt(text):
 
@@ -432,10 +433,6 @@ def run_massive_scan():
         f" {remaining}"
     )
 
-    print(
-        "\nStarting Advanced Scan...\n"
-    )
-
     progress_bar=tqdm(
         total=remaining,
         desc="Scanning Prompts",
@@ -444,109 +441,155 @@ def run_massive_scan():
 
     processed_count=0
 
-    for idx,(prompt,label) in enumerate(
-        dataset
+    for batch_start in range(
+        0,
+        len(dataset),
+        BATCH_SIZE
     ):
+
+        batch=dataset[
+            batch_start:
+            batch_start+BATCH_SIZE
+        ]
+
+        batch_prompts=[
+            x[0]
+            for x in batch
+        ]
+
+        batch_labels=[
+            x[1]
+            for x in batch
+        ]
 
         try:
 
-            if prompt in existing_prompts:
+            batch_inputs=tokenizer(
 
-                continue
+                batch_prompts,
 
-            token_scores=scan_tokens(
-                prompt,
+                return_tensors="pt",
+
+                padding=True,
+
+                truncation=True,
+
+                max_length=128
+
+            )
+
+            batch_inputs={
+
+                k:v.to(device)
+
+                for k,v in batch_inputs.items()
+            }
+
+            token_results=scan_tokens_batch(
+                batch_prompts,
                 llm,
                 tokenizer,
                 device
             )
 
-            layer_scores=scan_layers(
-                prompt,
+            layer_results=scan_layers_batch(
+                batch_prompts,
                 llm,
                 tokenizer,
                 device
             )
 
-            hidden_state_data=(
-                scan_hidden_states(
-                    prompt,
+            hidden_results=(
+                scan_hidden_states_batch(
+                    batch_prompts,
                     llm,
                     tokenizer,
                     device
                 )
             )
 
-            neuron_signature=scan_neurons(
-                prompt,
+            neuron_results=scan_neurons_batch(
+                batch_prompts,
                 llm,
                 tokenizer,
                 device
             )
 
-            semantic_features=(
-                extract_semantic_features(
-                    prompt
-                )
-            )
-
-            feature_vector=build_feature_vector(
-
-                token_scores,
-
-                layer_scores,
-
-                hidden_state_data,
-
-                neuron_signature,
-
-                semantic_features
-            )
-
-            feature_vector.append(prompt)
-
-            feature_vector.append(label)
-
-            results.append(feature_vector)
-
-            processed_count+=1
-
-            progress_bar.update(1)
-
-            progress_bar.set_postfix({
-
-                "processed":
-                processed_count,
-
-                "remaining":
-                remaining-processed_count
-            })
-
-            if (
-                processed_count
-                %
-                CHECKPOINT_EVERY
-                ==
-                0
+            for idx,prompt in enumerate(
+                batch_prompts
             ):
 
-                df=pd.DataFrame(results)
+                if prompt in existing_prompts:
 
-                df.to_parquet(
-                    OUTPUT_FILE,
-                    index=False
+                    continue
+
+                semantic_features=(
+                    extract_semantic_features(
+                        prompt
+                    )
                 )
 
-                print(
-                    f"\nCheckpoint Saved "
-                    f"({processed_count})"
+                feature_vector=build_feature_vector(
+
+                    token_results[idx],
+
+                    layer_results[idx],
+
+                    hidden_results[idx],
+
+                    neuron_results[idx],
+
+                    semantic_features
                 )
+
+                feature_vector.append(prompt)
+
+                feature_vector.append(
+                    batch_labels[idx]
+                )
+
+                results.append(feature_vector)
+
+                processed_count+=1
+
+                progress_bar.update(1)
+
+                progress_bar.set_postfix({
+
+                    "processed":
+                    processed_count,
+
+                    "remaining":
+                    remaining-processed_count,
+
+                    "batch_size":
+                    BATCH_SIZE
+                })
+
+                if (
+                    processed_count
+                    %
+                    CHECKPOINT_EVERY
+                    ==
+                    0
+                ):
+
+                    df=pd.DataFrame(results)
+
+                    df.to_parquet(
+                        OUTPUT_FILE,
+                        index=False
+                    )
+
+                    print(
+                        f"\nCheckpoint Saved "
+                        f"({processed_count})"
+                    )
 
         except Exception as e:
 
             print(
-                f"\nSkipping prompt "
-                f"due to error: {e}"
+                f"\nBatch Error: {e}"
             )
 
             continue

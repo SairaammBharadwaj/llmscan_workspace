@@ -20,5 +20,5 @@ hf_cache/
 .env
 logs/
 outputs/
-
+!data/advanced_causal_dataset_v7.parquet
 .ipynb_checkpoints/

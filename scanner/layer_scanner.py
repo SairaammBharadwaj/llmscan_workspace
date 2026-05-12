@@ -1,133 +1,184 @@
 import torch
 
-def get_logits(
+def get_first_token_logits_batch(
+
     model,
-    input_ids
+    input_ids,
+    attention_mask
+
 ):
 
     with torch.no_grad():
 
-        outputs=model(
-            input_ids=input_ids
-        )
+        with torch.autocast(
+            device_type="cuda",
+            dtype=torch.float16
+        ):
 
-    logits=outputs.logits[
-        0,
-        -1,
-        :
-    ]
+            outputs=model(
 
-    return logits
+                input_ids=input_ids,
 
-def scan_layers(
-    prompt,
+                attention_mask=attention_mask
+            )
+
+            next_token_logits=(
+                outputs.logits[:, -1, :]
+            )
+
+    return next_token_logits
+
+def scan_layers_batch(
+
+    prompts,
     model,
     tokenizer,
     device
+
 ):
 
     print(
-        "\n--- Starting Advanced Layer Scan ---"
+        "\n--- Batch Layer Scan ---"
     )
 
-    print(f"Prompt: '{prompt}'")
-
     inputs=tokenizer(
-        prompt,
+
+        prompts,
+
         return_tensors="pt",
+
+        padding=True,
+
         truncation=True,
+
         max_length=128
+
     )
 
     inputs={
+
         k:v.to(device)
+
         for k,v in inputs.items()
     }
 
     input_ids=inputs["input_ids"]
 
-    baseline_logits=get_logits(
-        model,
-        input_ids
+    attention_mask=inputs[
+        "attention_mask"
+    ]
+
+    baseline_logits=(
+        get_first_token_logits_batch(
+
+            model,
+
+            input_ids,
+
+            attention_mask
+        )
     )
 
-    if hasattr(model,"model"):
+    if (
+        hasattr(model,"model")
+        and
+        hasattr(model.model,"layers")
+    ):
 
         layers=model.model.layers
 
-    elif hasattr(model,"transformer"):
+    elif (
+        hasattr(model,"transformer")
+        and
+        hasattr(model.transformer,"h")
+    ):
 
         layers=model.transformer.h
 
     else:
 
         raise ValueError(
-            "Unsupported model architecture."
+            "Unsupported architecture."
         )
 
-    layer_effects=[]
+    num_layers=len(layers)
 
-    for idx,layer in enumerate(layers):
+    batch_size=input_ids.shape[0]
 
-        def identity_hook(
+    all_results=[
+
+        []
+
+        for _ in range(batch_size)
+    ]
+
+    for layer_idx in range(num_layers):
+
+        def skip_layer_hook(
             module,
-            inputs,
+            args,
             output
         ):
 
-            return inputs[0]
+            if isinstance(output,tuple):
 
-        hook=layer.register_forward_hook(
-            identity_hook
+                new_output=(
+                    args[0],
+                ) + output[1:]
+
+            else:
+
+                new_output=args[0]
+
+            return new_output
+
+        target_layer=layers[layer_idx]
+
+        hook_handle=(
+            target_layer.register_forward_hook(
+                skip_layer_hook
+            )
         )
 
         try:
 
-            intervened_logits=get_logits(
-                model,
-                input_ids
+            intervened_logits=(
+                get_first_token_logits_batch(
+
+                    model,
+
+                    input_ids,
+
+                    attention_mask
+                )
             )
 
-            distance=torch.norm(
-                baseline_logits -
+            distances=torch.norm(
+
+                baseline_logits
+                -
                 intervened_logits,
-                p=2
-            ).item()
 
-            layer_effects.append(
-                distance
+                p=2,
+
+                dim=1
             )
 
-            print(
-                f"Layer {idx:02d} "
-                f"-> CE: {distance:.6f}"
-            )
+            for batch_idx in range(
+                batch_size
+            ):
 
-        except Exception as e:
+                all_results[
+                    batch_idx
+                ].append(
 
-            print(
-                f"Layer {idx} failed: {e}"
-            )
-
-            layer_effects.append(0.0)
+                    distances[
+                        batch_idx
+                    ].item()
+                )
 
         finally:
 
-            hook.remove()
+            hook_handle.remove()
 
-    layer_effects=torch.tensor(
-        layer_effects,
-        dtype=torch.float32
-    )
-
-    layer_effects=(
-        layer_effects /
-        (
-            torch.norm(
-                layer_effects,
-                p=2
-            ) + 1e-8
-        )
-    )
-
-    return layer_effects.tolist()
+    return all_results

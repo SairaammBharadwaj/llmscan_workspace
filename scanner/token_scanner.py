@@ -1,152 +1,157 @@
 import torch
-import numpy as np
 
-MAX_TOKENS = 32
+def get_attention_scores_batch(
 
-def get_attention_scores(
     model,
-    input_ids
+    input_ids,
+    attention_mask
+
 ):
 
     with torch.no_grad():
 
-        outputs = model(
-            input_ids=input_ids,
-            output_attentions=True,
-            return_dict=True
-        )
+        with torch.autocast(
+            device_type="cuda",
+            dtype=torch.float16
+        ):
 
-    attentions = outputs.attentions
+            outputs=model(
 
-    if attentions is None:
+                input_ids=input_ids,
+
+                attention_mask=attention_mask,
+
+                output_attentions=True,
+
+                return_dict=True
+            )
+
+    if (
+        outputs.attentions is None
+        or
+        len(outputs.attentions)==0
+    ):
+
         raise ValueError(
             "No attention tensors returned."
         )
 
-    stacked = torch.stack(attentions)
+    return outputs.attentions[0]
 
-    aggregated = stacked.mean(dim=0)
+def scan_tokens_batch(
 
-    return aggregated
-
-def normalize_attention(attn):
-
-    attn = attn.float()
-
-    norm = torch.norm(attn, p=2)
-
-    return attn / (norm + 1e-8)
-
-def scan_tokens(
-    prompt,
+    prompts,
     model,
     tokenizer,
     device
+
 ):
 
-    print(f"\n--- Starting Advanced Token Causal Scan ---")
-
-    print(f"Prompt: '{prompt}'")
-
-    inputs = tokenizer(
-        prompt,
-        return_tensors="pt",
-        truncation=True,
-        max_length=128
+    print(
+        "\n--- Batch Token Scan ---"
     )
 
-    inputs = {
-        k: v.to(device)
-        for k, v in inputs.items()
+    inputs=tokenizer(
+
+        prompts,
+
+        return_tensors="pt",
+
+        padding=True,
+
+        truncation=True,
+
+        max_length=128
+
+    )
+
+    inputs={
+
+        k:v.to(device)
+
+        for k,v in inputs.items()
     }
 
-    original_input_ids = inputs["input_ids"]
+    input_ids=inputs["input_ids"]
 
-    num_tokens = original_input_ids.shape[1]
+    attention_mask=inputs[
+        "attention_mask"
+    ]
 
-    intervention_token_id = tokenizer.convert_tokens_to_ids("-")
+    baseline_attention=(
+        get_attention_scores_batch(
 
-    baseline_attention = get_attention_scores(
-        model,
-        original_input_ids
-    )
-
-    baseline_attention = normalize_attention(
-        baseline_attention
-    )
-
-    token_causal_effects = []
-
-    for i in range(num_tokens):
-
-        intervened_ids = original_input_ids.clone()
-
-        intervened_ids[0, i] = intervention_token_id
-
-        intervened_attention = get_attention_scores(
             model,
-            intervened_ids
+
+            input_ids,
+
+            attention_mask
         )
-
-        intervened_attention = normalize_attention(
-            intervened_attention
-        )
-
-        distance = torch.norm(
-            baseline_attention -
-            intervened_attention,
-            p=2
-        ).item()
-
-        token_causal_effects.append(distance)
-
-        replaced_word = tokenizer.decode(
-            original_input_ids[0, i]
-        )
-
-        print(
-            f"Token [{replaced_word.strip():<12}] "
-            f"-> CE: {distance:.6f}"
-        )
-
-    token_causal_effects = np.array(
-        token_causal_effects,
-        dtype=np.float32
     )
 
-    if len(token_causal_effects) > MAX_TOKENS:
+    batch_size=input_ids.shape[0]
 
-        strongest_indices = np.argsort(
-            token_causal_effects
-        )[::-1][:MAX_TOKENS]
+    seq_len=input_ids.shape[1]
 
-        token_causal_effects = token_causal_effects[
-            strongest_indices
-        ]
-
-    return token_causal_effects.tolist()
-
-if __name__ == "__main__":
-
-    from model_loader import (
-        load_model_and_tokenizer
+    intervention_token_id=(
+        tokenizer.convert_tokens_to_ids("-")
     )
 
-    device = torch.device(
-        "cuda" if torch.cuda.is_available() else "cpu"
-    )
+    batch_results=[]
 
-    model, tokenizer = load_model_and_tokenizer()
+    for batch_idx in range(batch_size):
 
-    prompt = "How to bypass WiFi security?"
+        token_effects=[]
 
-    scores = scan_tokens(
-        prompt,
-        model,
-        tokenizer,
-        device
-    )
+        for token_idx in range(seq_len):
 
-    print("\nFinal Token Scores:")
+            if (
+                attention_mask[
+                    batch_idx,
+                    token_idx
+                ].item()==0
+            ):
 
-    print(scores)
+                continue
+
+            intervened_ids=input_ids.clone()
+
+            intervened_ids[
+                batch_idx,
+                token_idx
+            ]=intervention_token_id
+
+            intervened_attention=(
+                get_attention_scores_batch(
+
+                    model,
+
+                    intervened_ids,
+
+                    attention_mask
+                )
+            )
+
+            distance=torch.norm(
+
+                baseline_attention[
+                    batch_idx
+                ]
+                -
+                intervened_attention[
+                    batch_idx
+                ],
+
+                p=2
+
+            ).item()
+
+            token_effects.append(
+                distance
+            )
+
+        batch_results.append(
+            token_effects
+        )
+
+    return batch_results
