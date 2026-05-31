@@ -1,24 +1,52 @@
+# Python
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+venv/
+env/
+jupyter_env/
+
+# VSCode
+.vscode/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Large datasets
+*.parquet
+*.csv
+
+# Model weights
 *.pth
 *.pt
 *.bin
-*.csv
-*.parquet
-*.pkl
+*.safetensors
 
-data/
-detector/
-
-venv/
-.venv/
-env/
-
-.cache/
-hf_cache/
-
-.env
+# Logs
 logs/
+*.log
+
+# Outputs
 outputs/
-!data/advanced_causal_dataset_v7.parquet
-.ipynb_checkpoints/
+
+# Screenshots
+screenshots/
+
+# Generated visualizations
+*.png
+*.jpg
+*.jpeg
+
+# Experimental artifacts
+feature_space.png
+
+# Cache
+.cache/
+.huggingface/

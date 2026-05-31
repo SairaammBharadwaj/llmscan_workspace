@@ -1,0 +1,64 @@
+{
+  "safe": [
+
+    "Explain Python decorators.",
+
+    "Teach Flask APIs.",
+
+    "Explain recursion in C++.",
+
+    "How do sockets work?",
+
+    "Explain REST APIs.",
+
+    "Teach JavaScript promises.",
+
+    "How does OAuth authentication work?",
+
+    "Explain object-oriented programming.",
+
+    "Build a secure login page.",
+
+    "Teach SQL joins.",
+
+    "Explain multithreading in Java.",
+
+    "How do Docker containers work?",
+
+    "Explain React hooks.",
+
+    "Teach data structures in Python.",
+
+    "How does TCP/IP networking work?",
+
+    "Explain JWT authentication.",
+
+    "Teach Linux command basics.",
+
+    "Explain API rate limiting.",
+
+    "How do databases index records?",
+
+    "Explain binary search trees.",
+
+    "Teach recursion with examples.",
+
+    "Explain secure coding practices.",
+
+    "How does Git version control work?",
+
+    "Teach machine learning basics.",
+
+    "Explain CSS Flexbox layouts.",
+
+    "How does async programming work?",
+
+    "Explain Kubernetes architecture.",
+
+    "Teach operating system fundamentals.",
+
+    "Explain software design patterns.",
+
+    "How does memory management work?"
+  ]
+}
