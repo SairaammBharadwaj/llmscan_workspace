@@ -1,0 +1,299 @@
+SE LAB INTERNAL — COMMANDS QUICK SHEET
+========================================
+
+1) JAVA / MAVEN / GIT VERSION CHECKS
+------------------------------------
+java -version
+javac -version
+mvn --version
+git --version
+echo $JAVA_HOME
+where.exe java
+
+
+2) MAVEN COMMANDS
+-----------------
+mvn validate
+mvn clean
+mvn compile
+mvn test
+mvn package
+mvn install
+mvn deploy
+mvn clean package
+mvn -U clean package
+
+Notes:
+- target/ = build output
+- .m2/repository = local Maven repository / dependency cache
+- package -> creates JAR/WAR in target/
+- install -> also copies artifact to .m2/repository
+
+
+3) GIT BASIC SETUP
+------------------
+git init
+git config --global user.name "Your Name"
+git config --global user.email "you@example.com"
+git config --list
+
+
+4) GIT CLONE / STATUS / LOG
+---------------------------
+git clone <repository-url>
+cd <project-folder>
+git status
+git branch
+git log
+git log --oneline
+git log --oneline --graph --all
+git diff
+git diff --staged
+
+
+5) GIT ADD / COMMIT
+-------------------
+git add .
+git add <file>
+git commit -m "Commit message"
+
+
+6) GIT BRANCH COMMANDS
+----------------------
+git branch <branch-name>
+git switch <branch-name>
+git switch -c <branch-name>
+git checkout -b <branch-name>
+git branch -d <branch-name>
+git branch -D <branch-name>
+
+
+7) GIT MERGE
+------------
+git switch main
+git switch master
+git merge <branch-name>
+
+After resolving a conflict:
+git add <file>
+git add .
+git commit -m "Resolve merge conflict"
+
+
+8) GIT RESTORE
+--------------
+git restore <file>
+git restore .
+git restore --staged <file>
+
+
+9) GIT REVERT
+-------------
+git revert <commit-id>
+
+Example:
+git log --oneline
+git revert a1b2c3d
+
+
+10) GIT RESET
+-------------
+git reset --soft HEAD~1
+git reset HEAD~1
+git reset --mixed HEAD~1
+git reset --hard HEAD~1
+
+Meaning:
+--soft  = remove commit, keep changes staged
+--mixed = remove commit, keep changes unstaged
+--hard  = remove commit and changes
+
+
+11) GIT REBASE
+--------------
+git switch <feature-branch>
+git rebase main
+git rebase master
+git rebase --continue
+git rebase --abort
+
+
+12) GIT STASH
+-------------
+git stash
+git stash list
+git stash apply
+git stash pop
+
+
+13) GIT REMOTE / PUSH / PULL / FETCH
+------------------------------------
+git remote -v
+git remote add origin <repository-url>
+git remote add origin1 <repository-url>
+git remote set-url origin <new-url>
+
+git branch -M main
+git push -u origin main
+git push
+git push -u origin <branch-name>
+
+git fetch
+git fetch origin
+git pull
+git pull origin main
+
+
+14) GIT COLLABORATION WORKFLOW
+------------------------------
+git clone <repo>
+git switch -c feature-login
+git add .
+git commit -m "Implement login"
+git fetch origin
+git pull origin main
+git push -u origin feature-login
+
+After merge on GitHub:
+git switch main
+git pull origin main
+git branch -d feature-login
+
+
+15) MAVEN PROJECT / FILE INSPECTION
+----------------------------------
+ls
+pwd
+cat pom.xml
+find src -type f
+cat src/main/webapp/index.jsp
+ls target
+
+
+16) DOCKER BASIC CHECKS
+-----------------------
+docker --version
+docker ps
+docker ps -a
+docker image ls
+docker images
+docker login
+
+
+17) DOCKER BUILD
+----------------
+docker build -t <image-name> .
+
+Examples:
+docker build -t se-lab-app .
+docker build -t lmsimage .
+
+
+18) DOCKER RUN
+--------------
+docker run <image-name>
+
+Detached:
+docker run -d <image-name>
+
+With port mapping:
+docker run -d -p 7089:8080 --name secontainer se-lab-app
+
+Example used:
+docker run -p 8080:8080 sairaammbharadwaj/labinternal
+
+General format:
+docker run -d -p <host-port>:<container-port> --name <container-name> <image-name>
+
+
+19) DOCKER CONTAINER MANAGEMENT
+-------------------------------
+docker stop <container-name-or-id>
+docker start <container-name-or-id>
+docker rm <container-name-or-id>
+docker rm -f <container-name-or-id>
+docker logs <container-name-or-id>
+
+
+20) DOCKER PULL / INTERACTIVE MODE
+---------------------------------
+docker pull ubuntu
+docker pull <image-name>
+
+docker run -it ubuntu bash
+docker run -it <image-name> bash
+exit
+
+
+21) DOCKER HUB TAG / PUSH
+-------------------------
+docker tag <local-image> <dockerhub-username>/<repo-name>:latest
+docker push <dockerhub-username>/<repo-name>:latest
+
+Examples:
+docker tag se-lab-app sairaammbharadwaj/labinternal:latest
+docker push sairaammbharadwaj/labinternal:latest
+docker pull sairaammbharadwaj/labinternal
+
+
+22) DOCKERFILE — WAR / TOMCAT WEB APP
+-------------------------------------
+FROM tomcat:9.0
+
+COPY target/*.war /usr/local/tomcat/webapps/ROOT.war
+
+EXPOSE 8080
+
+CMD ["catalina.sh", "run"]
+
+
+23) DOCKERFILE — JAR APP
+------------------------
+FROM eclipse-temurin:17-jre
+
+WORKDIR /app
+
+COPY target/*.jar app.jar
+
+CMD ["java", "-jar", "app.jar"]
+
+For a web JAR:
+EXPOSE 8080
+
+
+24) PORT MAPPING
+----------------
+-p 7089:8080
+
+Meaning:
+7089 = host port
+8080 = container port
+
+Open in browser:
+http://localhost:7089/
+http://localhost:8080/
+
+
+25) QUICK EXAM FLOW
+-------------------
+git clone <repo>
+cd <repo>
+
+mvn clean package
+
+Check target/
+- .war -> use Tomcat Dockerfile
+- .jar -> use JRE Dockerfile
+
+Git feature:
+git switch -c feature/new-feature
+git add .
+git commit -m "Add new feature"
+git switch main
+git merge feature/new-feature
+
+Docker:
+docker build -t app .
+docker run -d -p 8080:8080 --name appcontainer app
+docker ps
+docker logs appcontainer
